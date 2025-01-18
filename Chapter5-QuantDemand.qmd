@@ -1,0 +1,2521 @@
+---
+title: "Quantitative Models of Operant Demand"
+blank-lines-above-title: 2
+shorttitle: ~
+author:
+  - name: Brent A. Kaplan
+    corresponding: true
+    orcid: 0000-0002-3758-6776
+    email: bkaplan@ahpnet.com; bkaplan.ku@gmail.com
+    url: https://github.com/brentkaplan/
+    affiliations:
+      - name: "Advocates for Human Potential, Inc."
+        department: Innovation Department
+        address: "490-B Boston Post Road"
+        city: Sudbury
+        region: MA
+      - name: "codedbx.com"
+author-note:
+  blank-lines-above-author-note: 1
+  status-changes:
+    affiliation-change: ~
+    deceased: ~
+  disclosures:
+    study-registration: ~
+    data-sharing: The code to recreate this chapter is located at [github.com/brentkaplan/quant-demand](https://github.com/brentkaplan/quant-demand). Please visit the GitHub repository or [https://codedbx.com](https://codedbx.com) for the most current version of this chapter.
+    related-report: ~
+    conflict-of-interest: The author has no conflicts of interest to declare.
+    financial-support: ~
+    gratitude: ~
+    authorship-agreements: ~
+abstract: "This chapter provides a guide to quantitative methods for behavioral economic demand data. I begin with a primer on regression approaches, providing the reader with intuition behind modeling. I then offer seven practical steps for conducting demand analyses using R Statistical Software, from initial data preparation through model fitting and interpretation. I demonstrate these concepts using published data from an Alcohol Purchase Task, illustrating various modeling approaches, including fit-to-group, two-stage, and mixed-effects methods. To maximize accessibility for implementing these techniques, the chapter is written in Quarto, an open-source technical publishing framework. I provide detailed code examples and visualizations while highlighting helpful tools explicitly created to aid demand curve analyses. I discuss some challenges one might encounter when conducting these analyses and provide recommendations and useful resources for further learning. This chapter serves as a practical tutorial and a theoretical overview, making it valuable for researchers at various skill levels."
+keywords: [behavioral economics, demand, nonlinear regression, R Statistical Software, mixed effects models]
+citation: true
+bibliography: Quant-Demand.bib
+floatsintext: false
+format:
+  apaquarto-docx: default
+  apaquarto-html:
+    self-contained: true
+  apaquarto-typst:
+    keep-typ: true
+  apaquarto-pdf:
+    documentmode: man
+    keep-tex: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+#| output: false
+#| warning: false
+
+library(conflicted)
+library(tidyverse)
+library(easystats)
+library(flextable)
+library(ftExtra)
+library(officer)
+library(knitr)
+library(commonmark)
+library(gt)
+library(nlmrt)
+library(nlme)
+library(beezdemand)
+conflicts_prefer(dplyr::filter, .quiet = TRUE)
+conflicts_prefer(flextable::separate_header, .quiet = TRUE)
+conflicts_prefer(stats::sd, .quiet = TRUE)
+conflicts_prefer(purrr::compose, .quiet = TRUE)
+conflicts_prefer(stats::lag, .quiet = TRUE)
+
+
+wdir <- "workingdata/"
+pdir <- "plots/"
+if (!exists(wdir)) dir.create(wdir)
+if (!exists(pdir)) dir.create(pdir)
+
+```
+
+
+The field of behavioral economic demand focuses on quantifying the value
+of a reinforcer or outcome. As we will see, methods for quantifying
+value are vast and there is no single "correct" approach. This chapter is
+written assuming you, the reader, have some cursory
+knowledge of behavioral economic demand methods. If you have picked up
+this chapter without knowing much about demand, I encourage you to
+peruse Chapter 2 *Introduction to Operant Demand*
+and either Chapter 3
+*Nonhuman Research Methods/Procedures for Studying Operant Demand* or
+Chapter 4
+*Human Research Methods for Studying Operant Demand*. These chapters will
+provide the background knowledge necessary to understand how the
+quantitative approaches fit within the broader backdrop and framework of
+demand methodology.
+
+The chapter is organized as follows. I will first provide a brief primer on
+regression methods, including linear and nonlinear regression, and
+the various approaches to analyzing demand data. This primer should give you
+some intuitive ideas about what happens when we try to fit a model to the data
+and a better understanding of the differences between regression approaches.
+I will then
+highlight a few of the more popular and frequently used demand models (don't
+worry, I will sprinkle in citations to direct further reading). Then, similar
+to Chapter 10
+*Quantitative Models of Discounting*, I will outline and
+walk through the steps of analyzing demand data using the R Statistical
+Software and demonstrate several approaches to modeling demand data
+using freely available data. Then, I will finish the chapter by
+discussing some issues and considerations when modeling demand data
+and providing suggestions for resources.
+
+A quick note about this chapter before moving on: the chapter is written
+using Quarto [@quarto_2024], an "open-source scientific and technical
+publishing system built on Pandoc" and the source code and supporting
+files are available in my repository:
+[https://github.com/brentkaplan/quant-demand](https://github.com/brentkaplan/quant-demand).
+I *highly encourage* you to look at the source file, especially when navigating
+through some of the R code (while I expose some of the R code used in this
+document, there is plenty more that you can not see). This chapter would be
+much more tedious to write if it
+were not for the developers of the apaquarto extension
+[@Schneider_apaquarto], which allows for a seamless process of creating
+documents in accordance with American Psychological Association's 7th
+Edition style requirements.
+
+## Important Terms
+
+```{r}
+#| label: tbl-terms
+#| tbl-cap: Important behavioral economic demand terms
+#| ft.align: left
+
+table_data <- tibble(
+  Term = c(
+    "Cost", "Consumption", "Purchasing", "Demand Intensity", "Demand Elasticity",
+    "Change in Elasticity", "Omax", "Pmax", "Breakpoint"
+  ),
+  Similar_Terms = c(
+    "Price, Unit Price, Effort", "", "", "Q₀", "", "α",
+    "Max Expenditure", "", ""
+  ),
+  Definition = c(
+    "The response effort or monetary expenditure associated with obtaining one unit of a commodity. It represents the price, effort, or number of responses required, or a combination of these factors.",
+    "The amount of a commodity earned or obtained and then consumed at a specific cost.",
+    "The quantity of a commodity obtained or earned, typically equal to consumption but particularly relevant in hypothetical scenarios or tasks where not all purchased items are consumed.",
+    "The level of consumption associated with minimal or zero cost. This may be measured directly (such as free consumption) or derived from demand models.",
+    "Reflects the reduction in consumption when cost increases by a single unit. Elasticity often changes with cost, following a curvilinear demand curve. It is generally derived from model parameters, making interpretation dependent on the specific model used and often requiring multiple parameters for precision.",
+    "As elasticity is cost-dependent and demand is curvilinear, some models measure the rate of elasticity change as cost rises. Like elasticity, this parameter is derived from model-based parameters, which influences interpretation and makes it contextually dependent.",
+    "The peak amount spent or maximum effort exerted for any given price. This value can be computed by identifying Pmax and then multiplying it by the consumption level at that price point.",
+    "The cost associated with the Omax value. Calculated by determining where the demand curve has a slope of -1 in log-log space, irrespective of the specific demand model used.",
+    "The cost threshold that brings consumption down to zero. It can be derived from raw data or model-based equations, though models with exponential decay functions may not reach zero, requiring specialized estimation methods."
+  )
+)
+
+terms_table <- flextable(table_data) |>
+  set_header_labels(
+    Term = "Term",
+    Similar_Terms = "Similar Terms",
+    Definition = "Definition"
+  ) |>
+  width(j = "Term", width = 1.5) |>
+  width(j = "Similar_Terms", width = 1.5) |>
+  width(j = "Definition", width = 4) |>
+  # Center align columns for better aesthetics
+  align(
+    j = c("Term", "Similar_Terms"),
+    align = "center",
+    part = "all"
+  )
+
+terms_table
+
+```
+
+Before diving into the numerous quantitative models proposed to describe
+demand data, there are a handful of terms with which familiarity will be
+helpful while navigating the chapter. Adapted in part from
+@koffarnusBehavioralEconomicDemand2022, @tbl-terms
+lists some of these terms and their
+definitions. These terms will be used throughout the chapter when referencing
+different aspects of demand and its analysis, and they are helpful generally
+when working with behavioral economic demand data and analyses.
+
+<br>
+
+**@tbl-terms ABOUT HERE**
+
+<br>
+
+## A Note on Regression
+
+Regression is the statistical process of investigating the relationship
+between two or more variables. Typically, regression aims to
+understand the effect of some independent variable (in other words, some
+variable that the experimenter manipulates or some variable that may
+*causally* affect the outcome) on a dependent variable (i.e., the
+outcome variable). Regression can take many forms, but for this chapter,
+we will distinguish between linear and nonlinear regression and spend most
+of the focus on the latter.
+
+### Linear regression versus nonlinear regression
+
+If you have learned about or conducted any regression modeling,
+you have probably heard of or performed linear regression. General linear
+regression models
+the relationship between the independent and dependent variables and,
+*importantly*, assumes this relationship is linear and the residuals (i.e.,
+the difference between what the model predicts and the observed data) follow
+a conditionally normal distribution. This means that no
+matter what, one unit increase in the value of the independent variable
+(e.g., age) will result in the same amount of change in the dependent
+variable (e.g., salary). The general linear model is simply a specific case of
+the class of models known as
+*generalized* linear models, where the assumptions about the residual structure
+are not so strict. Nonlinear regression models, on the other hand,
+can hold the assumption of conditionally normally distributed residuals, but
+is not necessarily inherent and, potentially more importantly, the distinction
+between the aforementioned linear regression and nonlinear regression lies in
+the relation of the predictor variables - they are expressed as a *nonlinear*
+combination. As such, nonlinear models can be highly
+flexible in their ability to bend and curve. Because behavioral economic
+demand methods attempt to model some consummatory behavior (or the self-report
+of such behavior) by capturing both the
+inelastic and elastic relationship with price, nonlinear models are
+especially useful for describing this pattern. Historically, numerous
+models have been proposed to describe how consumption decreases as a
+function of increasing costs, starting as far back as 1988
+[@hurshCOSTBENEFITANALYSISDEMAND1988].
+
+# Regression Approaches for Demand
+
+I want to highlight three regression approaches commonly used to analyze
+demand data. I will briefly describe each approach but the reader is
+encouraged to read @kaplanApplyingMixedeffectsModeling2021a for a more in-depth
+discussion of each.
+
+## Fit-to-Group Approach
+
+This first approach can be conducted in two ways. The first way is fitting
+a model to pre-aggregated averaged data. In this approach, data at each
+price is first averaged across individuals (or organisms) and then a line
+is fit to these averaged data. Because all the variability in the data is
+compressed into a singular point for each price, this approach ignores the
+intra-price variability and is typically not appropriate for statistical
+inference. However, this approach may be useful for descriptive, graphical,
+or theoretical equation testing. The second approach is fitting
+a curve to all data without aggregation, also known as a pooled approach.
+Under typical circumstances, the resulting point estimates from the
+regression will be the same regardless of either of these fit-to-group
+approaches. However, in the case of this pooled approach, the standard errors
+are likely to be incorrect because all data points are treated as independent
+observations when there is dependence within an individual or condition.
+
+## Two-Stage Approach
+
+This two-stage approach is quite common for analyzing demand data. In this
+approach, a demand model is fit to each individual's data separately. This
+approach results in parameter estimates for each individual and condition.
+We have called this the two-stage approach because the modeling serves as
+the first stage, and the resulting demand metrics are used in the second stage
+of statistical analysis to make some sort of inference or comparison (e.g., a
+t-test, correlation). One downside to this approach
+is that the model effectively overfits to the individual's data and ignores
+any information about how other individuals in the sample respond to the
+same experimental conditions.
+
+## Mixed-Effects Modeling
+
+Both of the approaches mentioned above are considered "fixed-effects" only
+approaches. Fixed effects parameter estimates that are constant or
+unchanging across different observations (i.e., they are "fixed" across
+individuals or conditions).
+In the approaches above, these fixed effects are Q~0~ and $\alpha$; for
+example, in the fit-to-means approach only one sample level Q~0~ and
+$\alpha$ is estimated so each individual inherits those values.
+Random effects, on the other hand,
+account for variability that differs across individuals or experimental
+sessions. They allow the model to recognize that there may be differences
+between subjects or conditions that are not captured by the fixed effects.
+You can think of mixed-effects models broadly as the ability to simultaneously
+estimate "population-level" effects (akin to the fit-to-group approaches)
+and "subject-level" effects (akin to the two-stage approach), with the model
+taking into account *all the data* provided.
+As such, mixed-effects models combine both fixed and random effects to capture
+both the within-subject variability and between-subject variability. This
+approach allows the researcher to properly account for the nested and crossed
+nature that is typical of demand data. For example, prices are often nested
+*within* an individual and the same individuals typically participate in
+multiple conditions, which is a classic example of crossed random effects.
+For a much more thorough and detailed discussion of these regression approaches
+including the numerous benefits of mixed-effects models, see
+@kaplanApplyingMixedeffectsModeling2021a.
+
+# Brief Overview of Models of Demand
+
+This section will provide a brief overview of some of the more frequently
+used demand models, and a new model that appears promising in simplifying
+demand analyses. There are certainly many other models not discussed
+here and while they could be afforded an entire chapter, that focus would
+detract from that of the current chapter on implenting the quantitative
+techniques of fitting these models. As such, a comprehensive review of all
+models is beyond the scope of the current chapter. Instead, I direct you toward
+@koffarnusBehavioralEconomicDemand2022 for a thorough discussion on the various
+models, including the advantages and disadvantages of each.
+For a quick reference to the seminal papers and model formulations,
+see @tbl-models.
+
+<br>
+
+**@tbl-models ABOUT HERE**
+
+<br>
+
+## Linear Elasticity
+
+The linear elasticity model (@eq-linear), proposed in 1988 by
+@hurshCOSTBENEFITANALYSISDEMAND1988, jointly describes changes in elasticity as
+a function of $a$ (change in slope with increases in price) and $b$ (the
+initial slope of the curve). $L$ is analogous to the intercept, or estimated
+consumption when price is infinitesimally small. In this model, changes in
+elasticity are assumed to be linear. Later equations improved upon
+the primary limitations of this model, where the idea of elasticity is jointly
+described by two parameters (instead of one) and where the model sometimes
+predicts increases in consumption at very small prices.
+
+$$
+log(Q_{j}) = log(L) + b \cdot (log(P)) - a \cdot P_{j} +\varepsilon_{j},j=1,...,k
+$$ {#eq-linear}
+
+## Exponential
+
+The exponential model of demand (@eq-hursh), introduced in 2008 by
+@hurshEconomicDemandEssential2008a, utilizes an exponential decay function to
+describe the relationship between price and consumption. Contrasted with earlier
+models, this model describes the *rate at which elasticity changes* across
+the demand curve in the free parameter $\alpha$ and the "intercept" or
+consumption when there is no price is *Q~0~*. In this model, the
+parameter *k* governs how high and low the curve is allowed to go; generally,
+smaller values of *k* will restrict the range of consumption, while larger
+values of *k* will allow for wider ranges of consumption. Due to the
+logarithmic transformations, especially for the dependent variable (y values),
+this model cannot incorporate zeros as data unless those zero values are
+*manually* transformed into a small positive value. Changing these values is
+not recommended as the decision of *what* "small" value to use may
+quite substantially affect the resulting parameter estimates
+[@koffarnusModifiedExponentialBehavioral2015a;
+@yuAnalyticalProblemsSuggestions2014].
+
+$$
+log(Q_{j}) = log(Q_{0}) + k(e^{-\alpha \cdot Q_{0} \cdot C_{j}}-1)+\varepsilon_{j},j=1,...,k
+$$ {#eq-hursh}
+
+## Exponentiated
+
+The exponentiated model (@eq-koff), introduced in 2015 by
+@koffarnusModifiedExponentialBehavioral2015a,
+serves as a simple mathematical transformation of @eq-hursh (both sides of
+the model are exponentiated), where all the parameters from @eq-hursh have the
+same interpretations. This model has been used frequently in the
+literature and is often preferred to the original formulation because
+no logarithmic transformations of y-values are required - the data can be
+fit directly.
+
+$$
+Q_{j}=Q_{0}\cdot10^{k(e^{-\alpha \cdot Q_{0} \cdot C_{j}}-1)}+\varepsilon_{j},j=1,...,k
+$$ {#eq-koff}
+
+## Simplified Exponential with Normalized Decay
+
+The simplified exponential with normalized decay (@eq-snd) is a modification
+of @eq-koff [@rzeszutek_inpress_exponential_model] that
+functionally removes the need to include the
+span parameter *k*. One benefit of this model is that some of the
+derived metrics (e.g., essential value) have a closed-form solution compared
+to other models that require approximations. This is a newly proposed model,
+and studies may benefit from demonstrating its utility compared to
+other models (e.g., @eq-hursh, @eq-koff).
+
+$$
+Q_{j}=Q_{0}\cdot e^{(-\alpha \cdot Q_{0} \cdot C_{j})}+\varepsilon_{j},j=1,...,k
+$$ {#eq-snd}
+
+
+::: {#tbl-models apa-note="As noted in previous works, such as @kaplanApplyingMixedeffectsModeling2021a, many original model formulations did not provide explicit error terms. Error terms describe deviations from a regression line, so they have not been included here."}
+| Citation                      | Model Formulation                                                                                 |
+|-------------------------------|---------------------------------------------------------------------------------------------------|
+| @hurshCOSTBENEFITANALYSISDEMAND1988 | $$\log(Q) = \log(L) + b(\log(P)) - aP$$                                                           |
+| @wingerRelativeReinforcingEffects2006 | $$\log(Q) = \log(L)e^{-aP}$$                                                           |
+| @hurshEconomicDemandEssential2008a | $$\log(Q) = \log(Q_{0}) + k(e^{-\alpha Q_{0}C} - 1)$$                                      |
+| @yuAnalyticalProblemsSuggestions2014 | $$Q = L \cdot P^{b} \cdot e^{-aP}$$                                                     |
+| @koffarnusModifiedExponentialBehavioral2015a    | $$Q = Q_{0} \cdot 10^{k(e^{-\alpha Q_{0}C} - 1)}$$                                              |
+| @newmanImprovedDemandCurve2020 | $$Q = Q_{0} \left[ 1 + \left( \frac{P}{P_{0}} \right)^b \right]^{-a/b}$$                     |
+| @gilroyZeroboundedModelOperant2021   | $$\text{IHS}(Q) = \text{IHS}(Q_{0}) + \text{IHS}(Q_{0}) \cdot e^{-\alpha Q_{0}P} - 1$$ <br> where $$\text{IHS}(Q_{0}) = \log_{10} \left(0.5 \cdot Q_{0} + \sqrt{0.25 \cdot Q_{0}^2 + 1} \right)$$ |
+| @rzeszutek_inpress_exponential_model | $$Q_{j}=Q_{0}\cdot e^{(-\alpha \cdot Q_{0} \cdot C_{j})}$$ |
+
+: Quantitative Models of Demand
+:::
+
+# Tools for Demand Analysis
+
+Several tools and software exist for modeling demand. GraphPad Prism
+[@graphpad_software] is one popular program to conduct demand analysis.
+While Prism is also a popular software for statistical analysis and
+data visualization (especially in the fied of biostatistics), it
+is proprietary and costs money to license and use. Other free
+software languages you can use to run demand analyses (essentially any program
+that can perform nonlinear regression) include,
+but are not limited to, software such as R and Python. This chapter
+will primarily focus on using the R Statistical Programming Language
+[@rcoreteamLanguageEnvironmentStatistical2024]
+to analyze demand data. R is a free, open-source programming language and
+environment for statistical computing and graphics and is a popular
+language for statistical analysis and data visualization. R has "packages,"
+which are collections of functions that can be used to perform specific
+tasks. For example, the *nlmrt* and *nlme* packages
+[@pinheiroNlmeLinearNonlinear2023; @nashNlmrtFunctionsNonlinear2016] contain
+functions that are used to run nonlinear fixed effects and mixed effects
+models, respectively. For this chapter, we will use collections of
+packages such as *tidyverse* [@wickhamWelcomeTidyverse2019] and
+*easystats* [@ludeckeEasystatsFrameworkEasy2022], as well as individual packages
+such as *nlmrt* and *nlme*. I have developed a specific R package called
+*beezdemand*
+[Behavioral Economic Easy Demand; @kaplanPackageBeezdemandBehavioral2019; @kaplanBeezdemandBehavioralEconomic2023]
+that contains many
+helper functions that can be used to conduct various aspects related to
+demand analyses. Although I will not rely on the *beezdemand* package
+for everything in this chapter, I will use some functions and highlight others
+that may make analyses easier.
+
+One other tool that I have made recently available is *shinybeez*
+[@kaplan_under_review_shinybeez], which is an R Shiny application that can be
+used to conduct behavioral
+economic demand and discounting analyses. A Shiny application is essentially
+a web application that can be run locally or on the web and allows the user
+to conduct analyses without having to write any code. The *shinybeez*
+application is (currently) available at
+[https://brentkaplan.shinyapps.io/shinybeez/](https://brentkaplan.shinyapps.io/shinybeez/),
+and the source code is available at
+[https://github.com/brentkaplan/shinybeez](https://github.com/brentkaplan/shinybeez)
+(this repository will always contain up-to-date web URLs).
+In addition to being completely free, *shinybeez* relies on *beezdemand*
+to perform the core functionality of the demand analyses. This allows
+*transparency* and *replicability* in conducting demand analyses regardless
+of whether you are using the *beezdemand* package as part of a broader R
+workflow or using the *shinybeez* application. Please consult
+@kaplan_under_review_shinybeez for more detailed information about *shinybeez*.
+Finally, you will find many of the papers I have published and referenced
+in this chapter, as well as tools that I have created at my website:
+[https://codedbx.com](https://codedbx.com). Visit that website to always
+find the most up-to-date versions of the tools and code that I create.
+
+# General Steps for Demand Analysis
+
+Here, I will outline the general steps that can be used to conduct demand
+analysis. These steps are not necessarily the only way to conduct demand
+analysis, but they are a good starting point for those new to these
+analyses, and I will generally follow these steps in this chapter. An important
+note for these steps is that I highly recommend using them to outline the
+decision rules used to conduct the analyses *a priori*. This is important
+because it will help you to be more
+transparent and replicable in your analyses and, importantly, decrease the
+likelihood of getting lost in the garden of forking paths [@gelman2013garden].
+
+- Step 0: Analysis Development. This step involves developing a plan for
+  the analysis, including the specific demand model and regression
+  approach to be used, the criteria
+  for model selection, and the criteria for model validation. This step
+  should include laying out the decision rules you will use for
+  each of the following seven steps, including contingency plans for if
+  something does not go as planned (e.g., if a model you choose does not
+  converge, what changes will you make?).
+
+- Step 1: Data Preparation and Initial Examination. This step involves preparing
+  the data for analysis, including checking for missing values, outliers, and
+  data transformations. Practical approaches include creating a table
+  of descriptive statistics and potentially creating visualizations such as
+  scatterplots or histograms.
+
+- Step 2: Use Criteria to Examine Systematicity. This step involves using
+  systematic criteria to examine how data conform to our
+  preexisting expectations of demand functions.
+
+- Step 3: Model Fitting. Select the demand model and use nonlinear regression
+  to plot the demand curve. This step involves analyzing the data according to
+  the chosen regression method specified in Step 0 (i.e., fit-to-group,
+  two-stage, mixed effects models).
+
+- Step 4: Visual Analysis and Interpretation. Plot the demand curve using semi-
+  or double-logarithmic scales to create demand (and/or work) functions
+  visually depicting the model. Overlay model fit lines and data points to
+  visually examine how closely the model accurately represents the data points.
+
+- Step 5: Model Comparison and Refinement. If more than one demand model is
+  applicable, compare their fit indices (e.g., *R2* values) to select the most
+  accurate data representations. Adjust parameters (e.g., *k*) to improve
+  the fit and interpretability of the demand curve. Repeat steps 3 through
+  5 as needed or based on the *a priori* decision rules.
+
+- Step 6: Calculate Important Metrics. Calculate metrics from the
+  demand curve, including Q~0~ (model-based intensity), elasticity, and
+  model-based O~max~ and P~max~. Other metrics that may not be reliant on
+  fitting the demand curve include observed intensity, observed O~max~ and
+  P~max~, and breakpoint.
+
+- Step 7: Interpret and Report Findings. Explain what key measures mean in the
+  analysis context and broader research question. For example, whether
+  specific reinforcers maintain behavior longer or are more resistant to price
+  increases. Provide a detailed summary of the model parameters, including the
+  goodness-of-fit, and discuss any observed deviations or patterns in the
+  demand curve. Report all decisions made during this seven-step process
+  and, ideally, provide the code and data to facilitate replication.
+
+## Step 1. Data Preparation and Initial Examination of Example Demand Data
+
+```{r}
+#| label: import apt data
+#| cache: true
+#| warning: false
+#| include: false
+
+# apt
+if (file.exists(paste0(wdir, "apt-data.csv"))) {
+  apt <- read_csv(paste0(wdir, "apt-data.csv"))
+} else {
+  apt_url <- "https://raw.githubusercontent.com/brentkaplan/mixed-effects-demand/main/data/apt-data.csv"
+  write_csv(readr::read_csv(apt_url)[-1], paste0(wdir, "apt-data.csv"))
+  apt <- read_csv(paste0(wdir, "apt-data.csv"))
+}
+
+apt <- apt |>
+  mutate(gender = factor(gender)) |>
+  (\(x) filter(x, complete.cases(!!x)))() |>
+  pivot_longer(
+    cols = `0`:`20`,
+    names_to = "x",
+    values_to = "y"
+  ) |>
+  mutate(
+    x = as.numeric(x),
+    y = as.numeric(y),
+    id = as.factor(id)
+  ) |>
+  arrange(id, x)
+
+```
+
+In this chapter, we will work with a dataset I have previously made
+publicly available in the GitHub repository:
+[https://github.com/brentkaplan/mixed-effects-demand](https://github.com/brentkaplan/mixed-effects-demand).
+The data we will use was used previously by
+@kaplanApplyingMixedeffectsModeling2021a, where we introduced concepts about
+mixed-effects models for behavioral economic demand; however, here, I will
+provide a more step-by-step approach for conducting demand analyses in general
+according to the steps outlined before.
+
+The dataset is human self-report response data on the Alcohol
+Purchase Task (APT) from @kaplanHappyHourDrink2018. This study used
+“happy hour” alcohol pricing to explore how different promotional price
+frames (e.g., buy-one-get-one-free versus half-price deals) influence alcohol
+demand. We found that these frames significantly affected consumption patterns,
+with the buy-one-get-one-free format generating a higher demand. The data
+we will use here is a subset of the data from this study from one experimental
+condition.
+
+#### Alcohol Purchase Task
+
+The Alcohol Purchase Task consisted of `r length(unique(apt$x))` prices:
+`r paste0("$", unique(apt$x), collapse =  ", ")` and had a standard
+vignette:
+
+> In the questionnaire that follows we would like you to pretend to
+> purchase and consume alcohol during a 5-hour period.
+> Imagine that you and your friends are at a bar on a weekend night from
+> **9:00 p.m. until 2:00 a.m.** to see a band. Imagine that you do not have any
+> obligations the next day (i.e., no work or classes). The following questions
+> ask how many drinks you would purchase at various prices. The available
+> drinks are standard size domestic beers (12 oz.), wine (5 oz.), shots of
+> hard liquor (1.5 oz.), or mixed drinks containing one shot of liquor.
+> Assume that you did not drink alcohol or use drugs before you went to the
+> bar, and that you will not drink or use drugs after leaving the bar. You
+> cannot bring your own alcohol or drugs to the bar. Also, assume that the
+> alcohol you are about to purchase is for your consumption only. In
+> other words, you cannot sell the drinks or give them to anyone else.
+> You also cannot bring the drinks home and you have no other alcohol
+> at home. Everything you buy is, therefore, for your own personal use
+> within the **5 hour period** that you are at the bar. Please respond to
+> these questions honestly, as if you were actually in this situation.
+> To verify you understand the pretend scenario, you must correctly
+> answer the next three questions before moving on in the questionnaire.
+
+Then, participants were asked to correctly answer three multiple-choice
+questions before going forward: (a) “In this pretend scenario, how many hours
+do you have to consume the drinks?”, (b)
+“In this pretend scenario, how much did you drink before the
+bar?”, and (c) “In this pretend scenario, what is the drink special?”
+
+### Importance of exploring data before fitting
+
+```{r}
+#| label: tbl-apt-descriptive-table
+#| tbl-cap: Descriptive statistics for the Alcohol Purchase Task data.
+#| ft.align: left
+#| echo: false
+#| eval: true
+
+apt_sum <- apt |>
+  # select only x and y columns
+  select(x, y) |>
+  # for each unique x value
+  group_by(x) |>
+  # calculate the following statistics
+  summarise(
+    Mean = mean(y),
+    `Std. Dev` = sd(y),
+    Min = min(y),
+    `25%` = quantile(y, .25),
+    Median = median(y),
+    `75%` = quantile(y, .75),
+    Max = max(y)
+  ) |>
+  ungroup()
+
+apt_sum |>
+  mutate(x = paste0("$", x)) |>
+  rename(
+    "Price" = "x"
+  ) |>
+  flextable() |>
+  # round to two digits only for column Mean and Std. Dev
+  colformat_double(j = c("Mean", "Std. Dev"), digits = 2) |>
+  font(fontname = "Times New Roman", part = "all")
+
+```
+
+```{r}
+#| label: apt-descriptives
+#| echo: true
+#| eval: false
+
+apt |>
+  # select only x and y columns
+  select(x, y) |>
+  # for each unique x value
+  group_by(x) |>
+  # calculate the following statistics
+  summarise(
+    Mean = mean(y),
+    `Std. Dev` = sd(y),
+    Min = min(y),
+    `25%` = quantile(y, .25),
+    Median = median(y),
+    `75%` = quantile(y, .75),
+    Max = max(y)
+  ) |>
+  ungroup() |>
+  mutate(x = paste0("$", x)) |>
+  rename(
+    "Price" = "x"
+  )
+```
+
+When collecting demand data, I recommend visualizing or
+plotting consumption values as a function of the prices. This is done to
+examine the range of the data and determine whether
+specific values are *too extreme.* @tbl-apt-descriptive-table shows
+descriptive statistics such as mean, standard deviation, and quantiles
+at each price. As
+@tbl-apt-descriptive-table shows, the maximum number of drinks
+a participant reported was `r sort(apt_sum$Max, decreasing = T)[1]`, which
+corresponds to `r sort(apt_sum$Max, decreasing = T)[1] / 5` alcholic drinks
+per hour for five hours. These numbers, and numbers that you see, may seem
+unrealistic and should be investigated. At minimum, the responses by
+these participant(s) should be examined and at most removed if there is a
+justifiable and compelling reason for doing so. These decisions should be set
+forth in Step 0 when creating the analysis plan. @tbl-apt-beez-descriptives
+shows the descriptive table ouput from the `GetDescriptives()` function in
+the *beezdemand* package[^a]. This table provides similar information to
+@tbl-apt-descriptive-table that I manually created.
+
+[^a]: *shinybeez* automatically creates a descriptive table for you
+when you load your data.
+
+<br>
+
+**@tbl-apt-descriptive-table ABOUT HERE**
+
+<br>
+
+
+```{r}
+#| label: fig-apt-descriptives
+#| fig-cap: Descriptive statistics for the Alcohol Purchase Task data. Boxplots represent the 25% to 75% interquartile range, horizontal lines within the boxplots represent the median, high and low points represent the maximum and minimum values, and the red line represents the mean.
+#| eval: true
+
+apt_descriptives_fig <- ggplot(apt_sum, aes(x = factor(x))) + # Convert x to a factor for boxplot grouping
+  # Overlay boxplots for each x level
+  geom_boxplot(
+    aes(ymin = Min, lower = `25%`, middle = Median, upper = `75%`, ymax = Max),
+    stat = "identity",
+    width = 0.5,
+    fill = "lightgray",
+    alpha = 0.6,
+    color = "black"
+  ) +
+  # Line for mean
+  geom_line(
+    aes(y = Mean, group = 1),
+    color = "red",
+    linewidth = 1,
+    alpha = 0.5
+  ) +
+  # Points for min and max values
+  geom_point(
+    aes(y = Min),
+    fill = "darkgreen",
+    size = 2,
+    shape = 21
+  ) +
+  geom_point(
+    aes(y = Max),
+    fill = "darkred",
+    size = 2,
+    shape = 21
+  ) +
+  scale_x_discrete(
+    expand = c(.03, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.03, 0)
+  ) +
+  # Labels and theme
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Self-reported Drinks Purchased"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(color = "black")
+  )
+
+# save as pdf
+ggsave(
+  filename = "apt_descriptives.pdf",
+  plot = apt_descriptives_fig,
+  device = "pdf",
+  path = pdir,
+  width = 7,
+  height = 6
+)
+
+# save as tiff
+ggsave(
+  filename = "Figure_1.tiff",
+  plot = apt_descriptives_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 7,
+  height = 6
+)
+
+apt_descriptives_fig
+
+```
+
+Sometimes, it is helpful to examine the data by plotting the relative
+distribution of responses for each price. @fig-apt-descriptives shows
+such data for the APT. In this figure, the gray boxplots represent the 25th
+to 75th percentile, with the horizontal lines representing the median values,
+the red line representing the mean, and the green and red dots representing the
+minimum and maximum values, respectively. You can see that there is quite a bit
+of variability in the first couple of prices.
+Overall, the average and median number
+of self-reported drinks purchased *decreases* as the price per drink increases,
+typical of demand data. Plotting data in this way can help you see
+big-picture trends in the data to identify extreme values or patterns
+counter to expectations. However, it is also important to attempt to
+quantify the extent to which demand data are considered "systematic".
+
+<br>
+
+**@fig-apt-descriptives ABOUT HERE**
+
+<br>
+
+## Step 2: Use Criteria to Examine Systematicity
+
+@steinIdentificationManagementNonsystematic2015 proposed a set of three criteria
+for examining and identifying the extent to which demand data (e.g., responses)
+are deemed "systematic." These three criteria include trend, bounce, and
+reversals from zero. Trend assumes that consumption from the first
+price to the last price should go down (with a suggested default value
+of at least 0.025 log-unit reduction per log-unit range in price).
+Bounce is a measure of price-to-price increases/decreases in consumption,
+as the general expectation is that consumption should decrease overall and not
+result in frequent price increases. Stein and colleagues suggest a detection
+limit of 0.10, meaning the criteria is flagged when increases occur for more
+than 10% of the price increments. Finally, reversals from zero occur when a
+non-zero response follows two or more consecutive zero responses. Readers are
+encouraged to consult
+@steinIdentificationManagementNonsystematic2015 for
+a more detailed discussion of these criteria. Important to note is that
+these criteria are for *identification* and are not to be used automatically
+or thoughtlessly for exclusion.
+
+Although I recommend researchers screen for systematicity and report these
+numbers, the decision to retain these response sets in subsequent analyses is in
+the researcher's hands. If the researcher decides to remove or exclude some
+response sets based on these criteria, I recommend analyzing both the full
+dataset and the restricted dataset and reporting the extent to which excluding
+those response sets affected the results and interpretations.
+
+<br>
+
+```{r}
+#| label: apt systematic criteria
+#| echo: true
+
+# pass the dataframe `apt` to the `CheckSystematic` function from the
+# beezdemand package. default values are used for the three criteria.
+apt_unsys <- beezdemand::CheckUnsystematic(apt)
+
+```
+
+<br>
+
+```{r}
+#| label: tbl-apt-beez-unsys
+#| tbl-cap: First ten rows from the checkUnsystematic function from the beezdemand package.
+#| ft.align: left
+#| eval: true
+
+apt_unsys |>
+  slice(1:10) |>
+  flextable() |>
+  colformat_double(j = c("DeltaQ", "Bounce"), digits = 2) |>
+  font(fontname = "Times New Roman", part = "all")
+
+```
+
+Here, I use the `checkUnsystematic` function from the *beezdemand* package.
+This function outputs a data frame with the total number of criteria passed,
+each criteria's value and whether that criterion was met, and
+the number of positive values. The number of positive values is helpful
+because, in some regression approaches (e.g., two-stage), these
+datasets cannot be fit. @tbl-apt-beez-unsys shows the output
+from this function[^c]. You can see that the criteria values all differ and
+that only among this small subset, id = 5 passes only two criteria. Numbers
+and percentages of the number of response sets that pass the three crtieria,
+as well as how these respondents are treated, should be reported. For example,
+@tbl-apt-unsystematic-descriptives shows the number and percentage of response
+sets associated with the number of criteria passed.
+
+[^c]: *shinybeez* automatically creates a table of unsystematic criteria similar
+to @tbl-apt-beez-unsys. Criteria values can be specified in the application.
+
+<br>
+
+**@tbl-apt-beez-unsys ABOUT HERE**
+
+<br>
+
+## Step 3: Model Fitting
+
+### Approaches for Handling *k* Values
+
+The *k* value in @eq-hursh and @eq-koff generally reflects a the "range" of the
+data and functionally constrains the upper and lower bounds of the demand
+model, such that a higher *k* value will result in a relatively higher and
+lower asymptote and a lower *k* value will result in a relatively lower upper
+bound and a relatively higher lower bound. There are several different ways
+of calculating *k* values. One approach does not rely on solving it as a
+free parameter and is instead calculated based on the observed range of the
+data. Then, this value is inserted as a constant into the model during the
+fitting process. Sometimes, a value of 0.5 is added to the calculated
+observed range because of the potential that an estimated *Q~0~* value
+might exceed the range of the observed data. Such changes should be reported
+when describing the method of calculating *k*. Another approach is to treat
+*k* as a free parameter in the model process. In the two-stage approach, this
+can be done by solving for *k* *differently* for each participant or
+by *sharing* a singular (i.e., global) *k* value across all participants.
+The former approach typically results in estimates highly specific to each
+participant, whereas the latter approach considers the entire
+range of the data.
+
+<br>
+
+```{r}
+#| label: k
+#| echo: true
+
+# manual k calculation
+apt_k <- log10(max(apt$y[apt$y > 0]) / min(apt$y[apt$y > 0])) + 0.5
+
+# beezdemand k calculation specifying using the full range of data
+apt_k_beez <- beezdemand::GetK(apt, mnrange = FALSE)
+
+# identical results
+apt_k
+apt_k_beez
+
+```
+
+<br>
+
+In any case, treating *k* as a free parameter can cause
+issues with model convergence (i.e., finding an optimal solution based on
+a set of reasonable parameters). In my experience, when this occurs, the model
+estimates a very high *k* value that is many magnitudes higher than the actual
+range of the data in logarithmic units. For this chapter,
+I will use the first approach by calculating the observed range
+in logarithmic units and then adding 0.5 to that range. This approach
+is equivalent to the *beezdemand* function `GetK` with `mnrange = FALSE`[^d].
+The resulting *k* value is `r round(apt_k, 3)`. See the code chunk.
+
+[^d]: *shinybeez* and *beezdemand* allow several different options for
+calculating *k* values, including treating *k* as a free parameter.
+
+### A Note on Model Specification
+
+Entering the parameters to be solved into the model can be done in
+one of two ways. In the first, the parameters are entered directly
+into the model without any "transformation" such that Q~0~ and
+$\alpha$ are optimized in their natural units (e.g., Q~0~ in the
+units of consumption and $\alpha$ in the inverse units of price). Essentially,
+these units are on different scales. Small changes in  Q~0~  and
+$\alpha$  can lead to disproportionately large changes in the predicted
+demand curve, especially at extreme values (e.g., very high prices where
+consumption drops sharply). The other method - reexpressing Q~0~ and
+$\alpha$ as logarithms of Q~0~ and $\alpha$ during the fitting process - can
+help make parameter estimation more stable and less susceptible to outliers
+or noise in the data. For this chapter, I will express the
+models and the Q~0~ and $\alpha$ parameters in the model as logarithms.
+
+### Fit to Group
+
+Two "fit-to-group" approaches will be mentioned here briefly. The first
+is what we have termed the "fit to means," and the second is what we have
+termed "pooling data" (or "fit-to-pooled").
+
+#### Fit to Means
+
+<br>
+
+```{r}
+#| label: fit to means apt
+#| echo: true
+#| output: false
+#| eval: true
+
+# nlmrt::wrapnls version
+apt_averaged <- apt |>
+  # for each x value (i.e., price)
+  group_by(x) |>
+  # calculate the mean of y
+  summarise(mn = mean(y)) |>
+  # fit the nonlinear model
+  nlmrt::wrapnls(
+    # specify the model by Koffarnus et al.
+    mn ~ 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1)),
+    # find starting values that appear feasible based on the data
+    start = list(q0 = 1, alpha = -1),
+    data = _,
+    control = list(maxiter = 1000)
+  )
+
+# minpack.lm::nlsLM version
+apt_averaged_nlsLM <- apt |>
+  # for each x value (i.e., price)
+  group_by(x) |>
+  # calculate the mean of y
+  summarise(mn = mean(y)) |>
+  # fit the nonlinear model
+  minpack.lm::nlsLM(
+    mn ~ 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1)),
+    start = list(q0 = 1, alpha = -1),
+    data = _,
+    control = list(maxiter = 1000)
+  )
+
+# beezdemand::FitCurves version
+apt_averaged_beez <- beezdemand::FitCurves(
+  dat = apt,
+  # specify the equation
+  equation = "koff",
+  # specify the k value
+  k = apt_k,
+  # specify how the data should be aggregated
+  agg = "Mean"
+)
+
+```
+
+<br>
+
+Here, I have conducted the fit-to-means approach in three different ways. The
+first two use nonlinear regression packages *nlmrt* and
+*minpack.lm*. The functions from these two packages, compared to `nls` from base
+R, tend to be more robust in convergence and identify sensible
+initial values to start the optimization. The fit-to-means approach *typically*
+results in the easiest convergence and
+optimization (i.e., this approach tends to work well and does not frequently
+throw errors). The third approach I use is the `FitCurves` function from
+the *beezdemand* package. Instead of having to specify an equation, this
+function allows you to specify the equation to fit the data (currently
+supports @eq-hursh and @eq-koff) and the aggregation method (NULL for two-stage,
+"Mean" for fit-to-means, and "Pooled" for the fit-to-pooled approach).
+
+We can see the $\hat{Q_{0}}$ and $\hat{\alpha}$ (the hats indicated predicted
+values) estimates are expressed in the logarithmic units. $\hat{Q_{0}}$ =
+`r round(coef(apt_averaged)[[1]], 3)` and $\hat{\alpha}$ =
+`r round(coef(apt_averaged)[[2]], 3)`. When transformed back onto the
+parameter's original scale, these values are
+`r round(10^(coef(apt_averaged)[[1]]), 3)` and
+`r round(10^(coef(apt_averaged)[[2]]), 3)`. Notice how these are very similar
+to the results of the *beezdemand* package (identical to three decimal places):
+`r round(apt_averaged_beez$Q0d, 3)`
+and `r round(apt_averaged_beez$Alpha, 3)`.
+
+```{r}
+#| label: fig-apt-fit-to-means
+#| fig-cap: Fit-to-means approach for the Alcohol Purchase Task data.
+#| apa-note: Zero is undefined on the log scale, so this plot uses a pseudo-log scale to visualize zero.
+#| warning: false
+#| eval: true
+
+# create a vector of x values to smooth the curve
+x <- c(0, 0.001 * 1.1^(0:130))
+# create a data frame of predicted values
+q0 <- coef(apt_averaged)[[1]]
+alpha <- coef(apt_averaged)[[2]]
+apt_average_preds <- data.frame(
+  predx = x,
+  predy = 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1))
+)
+
+# plot the data
+apt_averaged_fig <- apt |>
+  # for each x value (i.e., price)
+  group_by(x) |>
+  # calculate the mean of y
+  summarise(mn = mean(y)) |>
+  ggplot(aes(x = x, y = mn)) +
+  # add the predicted values as a line
+  geom_line(
+    data = apt_average_preds,
+    aes(x = predx, y = predy),
+    color = "gray",
+    linewidth = 1.5
+  ) +
+  # add the mean data points
+  geom_point(
+    shape = 21,
+    fill = "white",
+    color = "black",
+    size = 2.5
+  ) +
+  # create a pseudo-log x-axis scale
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(sigma = .2, base = 10),
+    breaks = c(0, 0.25, 0.5, 1, 5, 10, 20),
+    labels = c("0", "0.25", "0.50", "1", "5", "10", "20"),
+    limits = c(0, 20.5),
+    expand = c(.01, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.03, 0),
+    limits = c(0, 10)
+  ) +
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Hypothetical Drinks Purchased"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text = element_text(color = "black")
+  )
+
+ggsave(
+  filename = "apt_averaged.pdf",
+  plot = apt_averaged_fig,
+  device = "pdf",
+  path = pdir,
+  width = 7,
+  height = 6
+)
+
+ggsave(
+  filename = "Figure_2.tiff",
+  plot = apt_averaged_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 7,
+  height = 6
+)
+
+apt_averaged_fig
+
+```
+
+@fig-apt-fit-to-means graphically displays the fit-to-means approach. As the figure
+shows, the line tracks the data points reasonably well. This is a typical,
+normal-looking demand curve when fit to averaged data. This approach is a simple
+way to examine how closely the predicted line tracks the data. The
+*beezdemand* package has functions to plot the data after fitting the
+data using the `FitCurves` function[^b].
+
+[^b]: *shinybeez* automatically creates a plot of the data depending on the
+regression method used (e.g., fit-to-group or two-stage).
+
+<br>
+
+**@fig-apt-fit-to-means ABOUT HERE**
+
+<br>
+
+#### Pooling Data
+
+<br>
+
+```{r}
+#| label: fit to pooled apt
+#| echo: true
+#| output: false
+#| eval: true
+
+# nlmrt::wrapnls version
+apt_pooled <- apt |>
+  nlmrt::wrapnls(
+    y ~ 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1)),
+    start = list(q0 = 1, alpha = -1),
+    data = _,
+    control = list(maxiter = 1000)
+  )
+
+# minpack.lm::nlsLM version
+apt_pooled_nlsLM <- apt |>
+  # fit the nonlinear model
+  minpack.lm::nlsLM(
+    y ~ 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1)),
+    start = list(q0 = 1, alpha = -1),
+    data = _,
+    control = list(maxiter = 1000)
+  )
+
+# beezdemand::FitCurves version
+apt_pooled_beez <- beezdemand::FitCurves(
+  dat = apt,
+  equation = "koff",
+  k = apt_k,
+  agg = "Pooled"
+)
+
+```
+
+<br>
+
+```{r}
+#| label: tbl-apt-fit-to-group
+#| tbl-cap: Parameter estimates from the fit-to-group approaches for the Alcohol Purchase Task data.
+#| ft.align: left
+#| apa-note: Estimates and standard errors are expressed in log(10) units.
+#| eval: true
+
+
+apt_averaged_tidy <- broom::tidy(apt_averaged) |>
+  mutate(Approach = "Fit-to-Mean")
+apt_pooled_tidy <- broom::tidy(apt_pooled) |>
+  mutate(Approach = "Fit-to-Pooled")
+
+bind_rows(apt_averaged_tidy, apt_pooled_tidy) |>
+  rename(
+    Parameter = term,
+    Estimate = estimate,
+    `Std. error` = std.error,
+    `t value` = statistic,
+    `p value` = p.value
+  ) |>
+  flextable() |>
+  colformat_double(
+    j = c("Estimate", "Std. error", "p value"),
+    digits = 4
+  ) |>
+  colformat_double(
+    j = c("t value"),
+    digits = 2
+  ) |>
+  font(fontname = "Times New Roman", part = "all")
+
+```
+
+Like the fit-to-means approach, I fit the data using the fit-to-pooled
+approach via three different methods. As mentioned earlier, both fit-to-group
+approaches result in highly similar parameter estimates. The standard errors of
+the estimates and goodness-of-fit statistics differ between the two approaches.
+@tbl-apt-fit-to-group shows the differences in the model estimates.
+
+<br>
+
+**@tbl-apt-fit-to-group ABOUT HERE**
+
+<br>
+
+```{r}
+#| label: fig-apt-fit-to-pooled
+#| fig-cap: Fit-to-pooled approach for the Alcohol Purchase Task data. All data points within 0 - 30 on the y-axis are shown, even though all data are used to fit the model. Data points are transparent so the darker the mass of points, the more data points are located at that price - consumption combination.
+#| apa-note: Zero is undefined on the log scale, so this plot uses a pseudo-log scale to visualize zero.
+#| warning: false
+#| message: false
+#| eval: true
+
+# create a vector of x values to smooth the curve
+x <- c(0, 0.001 * 1.1^(0:130))
+# create a data frame of predicted values
+q0 <- coef(apt_pooled)[[1]]
+alpha <- coef(apt_pooled)[[2]]
+apt_pooled_preds <- data.frame(
+  predx = x,
+  predy = 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1))
+)
+
+# plot the data
+apt_pooled_fig <- apt |>
+  ggplot(aes(x = x, y = y)) +
+  # add the predicted values as a line
+  geom_line(
+    data = apt_pooled_preds,
+    aes(x = predx, y = predy),
+    color = "red",
+    alpha = 1,
+    size = 1.5
+  ) +
+  # add the data points
+  geom_point(
+    shape = 16,
+    color = "black",
+    size = 1,
+    alpha = .1,
+    position = position_jitter(width = .01, height = .1)
+  ) +
+  # create a pseudo-log x-axis scale
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(sigma = .2, base = 10),
+    breaks = c(0, 0.25, 0.5, 1, 5, 10, 20),
+    labels = c("0", "0.25", "0.50", "1", "5", "10", "20"),
+    limits = c(0, 20.5),
+    expand = c(.01, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.03, 0),
+    limits = c(0, 30)
+  ) +
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Hypothetical Drinks Purchased"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text = element_text(color = "black")
+  )
+
+ggsave(
+  filename = "apt_pooled.pdf",
+  plot = apt_pooled_fig,
+  device = "pdf",
+  path = pdir,
+  width = 7,
+  height = 6
+)
+
+ggsave(
+  filename = "Figure_3.tiff",
+  plot = apt_pooled_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 7,
+  height = 6
+)
+
+apt_pooled_fig
+
+```
+
+@fig-apt-fit-to-pooled graphically displays the fit-to-pooled approach.
+Although all data points were fit to this model, I only show the data points
+between 0 and 30 on the y-axis. Furthermore, given the transparency
+of the points, more points in the x-y coordinate reflect a darker mass
+of points. As is often the case, the curve is nearly indistinguishable from
+the fit-to-mean approach.
+
+<br>
+
+**@fig-apt-fit-to-pooled ABOUT HERE**
+
+<br>
+
+### Two-Stage Approach to Modeling
+
+<br>
+
+```{r}
+#| label: apt-two-stage
+#| echo: true
+#| output: false
+#| cache: true
+#| eval: true
+
+# fit a single wrapnls function for use with apt data
+nls_fit <- function(df, kval) {
+  fit <- try(nlmrt::wrapnls(
+    y ~ 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1)),
+    start = list(q0 = 1, alpha = -1),
+    data = df,
+    control = list(maxiter = 1000)
+  ), silent = T)
+  return(fit)
+}
+
+# fit a single nlsLM function for use with apt data
+nlsLM_fit <- function(df, kval) {
+  fit <- try(minpack.lm::nlsLM(
+    y ~ 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1)),
+    start = list(q0 = 1, alpha = -1),
+    data = df,
+    control = list(maxiter = 1000)
+  ), silent = T)
+  return(fit)
+}
+
+# needs workaround because any datasets that do not converge results
+# in a logical NA instead of a tibble
+# create two replacement tibbles for any NAs; tidied and glanced
+# and use these for the `otherwise` argument in the next code block
+tidied_na <- tibble(
+  `term` = c("q0", "alpha"),
+  `estimate` = c(NA, NA),
+  `std.error` = c(NA, NA),
+  `statistic` = c(NA, NA),
+  `p.value` = c(NA, NA)
+)
+
+glanced_na <- tibble(
+  `sigma` = NA,
+  `isConv` = NA,
+  `finTol` = NA,
+  `logLik` = NA,
+  `AIC` = NA,
+  `BIC` = NA,
+  `deviance` = NA,
+  `df.residual` = NA,
+  `nobs` = NA
+)
+
+# nlmrt::wrapnls version
+apt_twostage <- apt |>
+  nest(data = c(x, y)) |>
+  group_by(id) |>
+  mutate(
+    # we fit the model here using the function we defined above
+    fit = map(data, nls_fit, kval),
+    # broom-specific functions to extract the model estimates and
+    tidied = map(fit, possibly(broom::tidy, otherwise = tidied_na)),
+    # goodness-of-fit statistics
+    glanced = map(fit, possibly(broom::glance, otherwise = glanced_na))
+  ) |>
+  unnest(cols = c("data")) |>
+  filter(x %in% 0) |>
+  unnest(cols = "tidied")
+
+# minpack.lm::nlsLM version
+apt_twostage_nlsLM <- apt |>
+  nest(data = c(x, y)) |>
+  group_by(id) |>
+  mutate(
+    fit = map(data, nlsLM_fit, kval),
+    tidied = map(fit, possibly(broom::tidy, otherwise = tidied_na)),
+    glanced = map(fit, possibly(broom::glance, otherwise = glanced_na))
+  ) |>
+  unnest(cols = c("data")) |>
+  filter(x %in% 0) |>
+  unnest(cols = "tidied")
+
+# beezdemand version
+apt_twostage_beez <- beezdemand::FitCurves(
+    dat = apt,
+    equation = "koff",
+    k = apt_k,
+  )
+
+```
+
+<br>
+
+```{r}
+#| label: tbl-apt-twostage
+#| tbl-cap: Two-stage approach to modeling the Alcohol Purchase Task data showing the first 5 participants' estimates.
+#| ft.align: left
+#| eval: true
+
+apt_twostage |>
+  ungroup() |>
+  select(
+    id,
+    "Parameter" = term,
+    "Estimate" = estimate,
+    "Std. error" = std.error,
+    "t value" = statistic,
+    "p value" = p.value
+  ) |>
+  slice(1:10) |>
+  flextable() |>
+  colformat_double(
+    j = c("Estimate", "Std. error", "p value"),
+    digits = 4,
+    na_str = "NA"
+  ) |>
+  colformat_double(
+    j = c("t value"),
+    digits = 2,
+    na_str = "NA"
+  ) |>
+  font(fontname = "Times New Roman", part = "all")
+
+```
+
+@tbl-apt-twostage shows the estimates from the two-stage approach for the
+first 10 participants in the sample (ids 1-10). You can see that each
+participant has specific $\hat{Q_{0}}$ and $\hat{\alpha}$ estimates, and for
+participant id = 5, the estimates result in NA values because this participant
+has no positive consumption values so the model cannot be fit.
+
+<br>
+
+**@tbl-apt-twostage ABOUT HERE**
+
+<br>
+
+```{r}
+#| label: fig-apt-twostage
+#| fig-cap: Two-stage approach to modeling the Alcohol Purchase Task data. Figure shows the first ten response sets. The fifth response set (id = 5) does not have a curve because the model cannot be fit to all zeros.
+#| apa-note: Zero is undefined on the log scale, so this plot uses a pseudo-log scale to visualize zero.
+#| warning: false
+#| message: false
+#| eval: true
+
+pred <- function(q0, alpha) {
+  x <- c(0, 0.001 * 1.1^(0:130))
+  data.frame(
+    predx = x,
+    predy = 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1))
+  )
+}
+
+apt_twostage_preds <- apt_twostage |>
+  dplyr::select(id, term, estimate) |>
+  pivot_wider(names_from = "term", values_from = "estimate") |>
+  mutate(model = "Two Stage") |>
+  group_by(id) |>
+  mutate(preds = map2(q0, alpha, pred)) |>
+  ungroup() |>
+  unnest(cols = "preds")
+
+apt_twostage_fig <- apt_twostage_preds |>
+  filter(id %in% 1:10) |>
+  ggplot() +
+  geom_line(aes(x = predx, y = predy, group = id)) +
+  geom_point(
+    data = dplyr::filter(apt, id %in% 1:10),
+    aes(x = x, y = y),
+    shape = 21,
+    fill = "white",
+    color = "black",
+    size = 2
+  ) +
+  facet_wrap(~id, scales = "free", nrow = 5) +
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(sigma = .2, base = 10),
+    breaks = c(0, 0.25, 0.5, 1, 5, 10, 20),
+    labels = c("0", "0.25", "0.50", "1", "5", "10", "20"),
+    limits = c(0, 20.5),
+    expand = c(.02, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.03, 2),
+    limits = c(0, 15)
+  ) +
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Hypothetical Drinks Purchased"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text = element_text(color = "black")
+  )
+
+ggsave(
+  filename = "apt_twostage.pdf",
+  plot = apt_twostage_fig,
+  device = "pdf",
+  path = pdir,
+  width = 7,
+  height = 8
+)
+
+ggsave(
+  filename = "Figure_4.tiff",
+  plot = apt_twostage_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 7,
+  height = 8
+)
+
+apt_twostage_fig
+
+```
+
+@fig-apt-twostage shows the two-stage approach to modeling the APT data
+for the first ten response sets in the sample (ids 1-10). The figure shows how
+well each curve tracks each response set's data. The curve closely
+tracks the data because each model is optimized to that response set. Response
+set five (id = 5) has no line because there are no positive consumption values.
+
+<br>
+
+**@fig-apt-twostage ABOUT HERE**
+
+<br>
+
+### Mixed-Effects Modeling
+
+```{r}
+#| label: nlme apt
+#| cache: true
+#| echo: true
+#| output: false
+#| eval: true
+
+apt_nlme <- nlme::nlme(
+  # specify the equation
+  y ~ 10^(q0) * 10^(apt_k * (exp(-10^(alpha) * 10^(q0) * x) - 1)),
+  # add column for the k value constant being used
+  data = apt |>
+    mutate(apt_k = apt_k),
+  # specify fixed effects
+  fixed = list(
+    q0 ~ 1,
+    alpha ~ 1
+  ),
+  # specify random effects
+  random = list(nlme::pdDiag(q0 + alpha ~ 1)),
+  # starting values from the fixed effects only model
+  start = list(fixed = c(
+    coef(apt_averaged)[1],
+    coef(apt_averaged)[2]
+  )),
+  groups = ~id,
+  method = "ML",
+  verbose = 2,
+  # specify control parameters for fitting
+  control = list(
+    msMaxIter = 5000,
+    niterEM = 5000,
+    maxIter = 5000,
+    pnlsTol = .001,
+    tolerance = .01,
+    apVar = T,
+    minScale = .0000001,
+    opt = "optim"
+  )
+)
+
+
+```
+
+
+```{r}
+#| label: fig-apt-nlme
+#| fig-cap: Predicted values from the mixed-effects model for the Alcohol Purchase Task data. Semi-transparent black lines indicate predicted values (random effects) for each participant while the solid red line indicates the predictions (fixed effects) for the entire sample.
+#| apa-note: Zero is undefined on the log scale, so this plot uses a pseudo-log scale to visualize zero.
+#| warning: false
+#| message: false
+#| eval: true
+
+# generate predicted lines for subset using random effects
+newvary <- coef(apt_nlme) |>
+  rownames_to_column("id") |>
+  group_by(id) |>
+  mutate(preds = map2(q0, alpha, pred)) |>
+  ungroup() |>
+  unnest(cols = "preds")
+
+# generate predicted line for population (fixed effects)
+newavg <- data.frame(
+  q0 = nlme::fixef(apt_nlme)[[1]],
+  alpha = nlme::fixef(apt_nlme)[[2]]
+) |>
+  mutate(id = "fixed") |>
+  group_by(id) |>
+  mutate(preds = map2(q0, alpha, pred)) |>
+  ungroup() |>
+  unnest(cols = "preds")
+
+# make plot 1 showing the individual predicted lines from the random effects
+# and the one predicted line from the population fixed effects
+apt_mixed_all_fig <- newavg |>
+  ggplot(aes(x = predx, y = predy, group = id)) +
+  geom_line(
+    data = newvary,
+    alpha = .05
+  ) +
+  geom_line(color = "#BD1E1E", size = 1.5) +
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(sigma = .2, base = 10),
+    breaks = c(0, 0.25, 0.5, 1, 5, 10, 20),
+    labels = c("0", "0.25", "0.50", "1", "5", "10", "20"),
+    limits = c(0, 20.5),
+    expand = c(.01, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.02, 0),
+    limits = c(0, 30)
+  ) +
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Hypothetical Drinks Purchased"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(color = "black"),
+    axis.ticks = element_line(color = "black")
+  )
+
+ggsave(
+  filename = "apt_mixed_all.pdf",
+  plot = apt_mixed_all_fig,
+  device = "pdf",
+  path = pdir,
+  width = 7,
+  height = 6
+)
+
+ggsave(
+  filename = "Figure_5.tiff",
+  plot = apt_mixed_all_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 7,
+  height = 6
+)
+
+apt_mixed_all_fig
+```
+
+@fig-apt-nlme shows the results of the mixed-effects modeling approach. This
+figure shows that the mixed-effect model can predict curves for each response
+set (the semi-transparent black lines; analogous to the two-stage approach)
+while also predicting the population fixed effects (the solid red line;
+analogous to the fit-to-group approach).
+
+
+<br>
+
+**@fig-apt-nlme ABOUT HERE**
+
+<br>
+
+
+```{r}
+#| label: fig-apt-nlme-facet
+#| fig-cap: Mixed-effects modeling approach showing the individual predicted lines from the random effects in black and the predicted line from the population fixed effects in red. Note that the fifth response set (id = 5) now has an individual predicted line because the model leverages information from the entire sample to assign a "best guess" for that response set.
+#| apa-note: Zero is undefined on the log scale, so this plot uses a pseudo-log scale to visualize zero.
+#| warning: false
+#| message: false
+#| eval: true
+
+
+# faceted for the subsets
+apt_mixed_subset_fig <- newvary |>
+  dplyr::filter(id %in% 1:10) |>
+  left_join(select(newavg, predx, "avgy" = predy), by = "predx") |>
+  mutate(
+    id = as.numeric(id),
+    id = as.factor(id)
+  ) |>
+  ggplot(aes(x = predx, y = predy, group = id)) +
+  geom_line() +
+  geom_line(
+    aes(x = predx, y = avgy),
+    color = "#BD1E1E"
+  ) +
+  geom_point(
+    aes(x = x, y = y, group = id),
+    data = dplyr::filter(apt, id %in% 1:10),
+    shape = 21,
+    fill = "white",
+    color = "black",
+    size = 2
+  ) +
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(sigma = .2, base = 10),
+    breaks = c(0, 0.25, 0.5, 1, 5, 10, 20),
+    labels = c("0", "0.25", "0.50", "1", "5", "10", "20"),
+    limits = c(0, 20.5),
+    expand = c(.02, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.03, 2),
+    limits = c(0, 15)
+  ) +
+  facet_wrap(~id, ncol = 2) +
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Hypothetical Drinks Purchased"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(color = "black"),
+    axis.ticks = element_line(color = "black")
+  )
+
+ggsave(
+  filename = "apt_mixed_subset.pdf",
+  plot = apt_mixed_subset_fig,
+  device = "pdf",
+  path = pdir,
+  width = 7,
+  height = 8
+)
+
+ggsave(
+  filename = "Figure_6.tiff",
+  plot = apt_mixed_subset_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 7,
+  height = 8
+)
+
+apt_mixed_subset_fig
+```
+
+@fig-apt-nlme-facet shows the results of the mixed-effects modeling approach
+except for each participant. The black line, again, shows the predicted
+lines generated from the random effects and the red line, which is identical
+across plots, shows the group-level effects. Notice how the black lines
+*deviate* higher and lower compared to the red line. The mixed-effects model
+takes into account all the data simultaneously to estimate both
+individual and group-level effects.
+
+<br>
+
+**@fig-apt-nlme-facet ABOUT HERE**
+
+<br>
+
+## Step 4: Visual Analysis and Interpretation
+
+We have analyzed the models visually and examined how well they describe
+the data using the three regression approaches. Overall, we have seen that
+@eq-koff describes the data well in all approaches. Provided our mixed effects
+regression approach and current model adequately fit the data, we can use the
+results of this model to conduct any model comparisons (i.e., fit a different
+model using the mixed effects regression approach) going forward and according
+to whatever predefined analysis steps are outlined from Step 0.
+
+## Step 5: Model Comparison and Refinement
+
+This step involves comparing the model(s), refining the model(s) (e.g.,
+choosing a different *k* value, using more informative initial values,
+choosing which response sets to include), and ultimately choosing the model
+that will be used to calculate key metrics and interpret the results.
+Therefore, Steps 3 through 5 may be repeated as necessary, and remember,
+all these decisions should be considered and outlined in Step 0. If decisions
+are made at this point *sans* any analysis plan, then decisions could be made
+based on what you think might be most likely to produce the results you
+want, not necessarily based on what is most appropriate and justifiable based
+on the existing literature and research question. For example,
+I have fit and plotted both @eq-koff and @eq-snd using the different approaches
+discussed in this chapter in @fig-apt-fit-to-means-model-compare,
+@fig-apt-fit-to-pooled-model-compare, and @fig-apt-nlme-model-compare.
+
+
+
+## Step 6: Calculate Important Metrics
+
+Step 6 involves calculating critical metrics related to the data and model
+chosen.
+These metrics typically fall into two buckets: observed metrics (those
+metrics calculated directly from the data) and derived metrics (those
+metrics calculated based on model fitting). I will explain the metrics
+in each section and provide helpful functions from the *beezdemand* package
+to help calculate them so they do not have to be calculated manually. For
+ease, I will demonstrate obtaining metrics based on the two-stage approach
+(using @eq-koff) because often times we will want to use the metrics in some
+second stage analysis (e.g., t-tests, correlations). Both the *beezdemand* R
+package and *shinybeez* will support automatic calculation of these metrics for
+mixed-effects models in the future.
+
+### Observed Metrics
+
+```{r}
+#| label: apt-observed-metrics
+#| output: false
+#| echo: true
+
+apt_beez_obs <- beezdemand::GetEmpirical(dat = apt)
+
+```
+
+```{r}
+#| label: tbl-apt-beez-observed
+#| tbl-cap: Observed metrics for the Alcohol Purchase Task data generated from the beezdemand package. Table shows the first ten response sets.
+#| ft.align: left
+#| message: true
+#| eval: true
+
+apt_beez_obs |>
+  slice(1:10) |>
+  flextable() |>
+  colformat_double(
+    j = c("BP0", "BP1", "Omaxe", "Pmaxe"),
+    digits = 2,
+    na_str = "NA"
+  ) |>
+  font(fontname = "Times New Roman", part = "all")
+
+
+```
+
+Depending on the analysis plan, this step involves generating the
+important metrics of interest and reporting them in a digestible format,
+such as a table or a figure. @tbl-apt-beez-observed shows the observed
+metrics calculated for the first ten ids using the *beezdemand* package.
+
+The `GetEmpirical()` function from the *beezdemand* package calculates the
+following observed metrics directly from the data[^e]:
+
+- Intensity: Intensity is the consumption (i.e., y value) associated with
+  the lowest price (i.e., x value) in the data. Depending on the task, this
+  could be when price is free or when price is some small value.
+
+- Breakpoint 0 (*BP~0*): The first and lowest price at which consumption is
+  zero.
+
+- Breakpoint 1 (*BP~1*): The last and highest price at which consumption
+  is nonzero.
+
+- *Omax~e~*: Represents the maximum expenditure
+  (e.g., effort or cost) an organism is willing to exert to obtain the
+  reinforcer, indicating the peak of “spending” for that commodity. This is
+  calculated by the peak of the expenditure curve by multiplying each x value
+  by its corresponding y value
+
+- *Pmax~e~*: The price (i.e., x value) associated with where *Omax~e~*
+  occurs.
+
+[^e]: *shinybeez* automatically creates a table of observed metrics for you
+when you load your data.
+
+<br>
+
+**@tbl-apt-beez-observed ABOUT HERE**
+
+<br>
+
+### Derived Metrics
+
+```{r}
+#| label: tbl-apt-beez-derived
+#| tbl-cap: Derived metrics for the Alcohol Purchase Task data generated from the beezdemand package. Table shows the first ten response sets and a subset of the derived metrics reported.
+#| ft.align: left
+#| cache: true
+#| eval: true
+
+apt_twostage_beez |>
+  select(-Intensity:-Pmaxe, -Q0Low:-AlphaHigh) |>
+  slice(1:10) |>
+  flextable() |>
+  colformat_double(
+    j = c("Q0d", "K", "R2", "Q0se", "AbsSS", "SdRes", "Omaxd", "EV", "Pmaxd", "Omaxa", "Pmaxa"),
+    digits = 2,
+    na_str = "NA"
+  ) |>
+  colformat_double(
+    j = c("Alpha", "Alphase"),
+    digits = 5,
+    na_str = "NA"
+  ) |>
+  font(fontname = "Times New Roman", part = "all")
+
+
+
+```
+
+The `FitCurves()` function from the *beezdemand* package calculates the
+following derived metrics based on the model chosen[^f]. @tbl-apt-beez-derived
+shows the derived metrics calculated for the first ten ids using
+the *beezdemand* package.
+
+- *Q0~d~*: The estimated consumption (i.e., y value) when price is zero. This
+  is analagous to the observed metric of Intensity, but has an associated
+  standard error provided in the output.
+
+- $\alpha$: The estimated *rate of change in elasticity* across the entire
+  demand curve.
+
+- Essential Value (*EV*): Essential value quantifies the relative reinforcing
+  efficacy of a commodity, representing how strongly an organism maintains
+  consumption of a commodity even as price increases or access is restricted,
+  and is inversely related to elasticity. The goal of EV is to be comparable
+  across all commodities (and models).
+
+- *Omax~d/a~*: Similar to Observed *Omax*, except this is (d)erived/(a)nalytic
+  because it is computed after calculating (d)erived/(a)nalytic *Pmax*.
+
+- *Pmax~d/a~*: (D)erived/(A)nalytic *Pmax* is the price at which the
+  slope of the tangent line of the demand curve is equal to -1 (also
+  known as unit elasticity).
+
+[^f]: *shinybeez* returns a table of derived metrics for you automatically
+when you run the demand analysis.
+
+<br>
+
+**@tbl-apt-beez-derived ABOUT HERE**
+
+<br>
+
+
+## Step 7: Interpret and Report Findings
+
+The final step is to interpret and report the findings of the demand curve
+analysis. This step involves taking the observed and/or derived metrics,
+reporting them either in text or a table, and interpreting them in the
+context of the research question. This step is crucial for communicating the
+demand curve analysis findings to others and ensuring that the findings are
+accurate, reliable, and understandable. This step should also
+involve reporting the goodness-of-fit metrics used to assess the adequacy
+of the model reported (e.g., R2, Root mean square error, AIC, BIC) depending
+on what was specified in Step 0.
+
+# Issues and Considerations for Demand Curve Analyses
+
+## *k*
+
+In my experience, one of the most common (and frustrating) issues in
+conducting demand curve analyses is dealing with the *k* parameter.
+Conceptually, we may want always to try and model *k* as a free parameter to
+let the model determine the best "range" of the data. However, in practice,
+this can lead to issues, with the most common problem being that the model
+attempts
+to estimate an astronomically high *k* value. While the model may technically
+converge, estimates of $\alpha$ tend to be quite different (because
+in @eq-hursh and @eq-koff, *k* is intricately linked with $\alpha$) than if
+using a more "reasonable" *k* value that more closely reflects the range of the
+data. As I have done here, one straightforward way of dealing with this
+is to determine a reasonable *k* value from the observed data and enter that
+value as a constant into the model. This approach tends to work quite well, and
+I believe it can be justifiable during the analysis. Another
+consideration is to test out @eq-snd recently proposed by
+@rzeszutek_inpress_exponential_model, where *k* is removed from the model
+entirely. I encourage the reader to consult @rzeszutek_inpress_exponential_model
+for a technical discussion of this model if you want to use it.
+Both *beezdemand* and *shinybeez* will have the functionality to fit this model
+along with @eq-hursh and @eq-koff.
+
+## Modeling Probabilities
+
+Another methodological approach to assessing "demand" is using
+probability-based purchase tasks
+[@reedQuantifyingAbuseLiability2016, @reedAppliedBehavioralEconomics2022,
+@gelinoBehavioralEconomicAnalysis2023, @harsinSafeSex2021,
+@romaProgress2016].
+In these purchase tasks,
+instead of the respondent responding with a quantity of the outcome
+being purchased, the respondent responds with a probability of purchasing
+the outcome (e.g., 0% to 100% likelihood of buying the outcome or engaging
+in the behavior). On the face of it, these tasks appear to
+resemble typical quantity-based purchase tasks. However, there are several
+aspects to consider, not only about the task itself but also about the
+analysis methods and the interpretations of the model results.
+
+The first consideration is whether probability-based purchase tasks are
+measuring demand in the conventional sense of what quantity-based
+purchase tasks attempt to measure. While self-report quantity-based purchase
+tasks are in and of themselves a slight departure from traditional experiential
+paradigms (e.g., self-administration), literature has shown adequate
+correspondence between these types of tasks [@kiselicaMeta2016,
+@martinezMeta2021, @kaplanAptReview2018, @wilsonCpt2015,
+@stricklandUtilizingCommodityPurchase2020]. Probability-based
+purchase tasks, while also being self-report, appear relatively newer, and
+evidence for adequate correspondence between these types of tasks and
+conventional quantity-based purchase tasks has not yet been firmly established.
+Taking a step back, the general concept of demand quantifies the
+extent to which an organism *defends its baseline consumption* in the
+face of increasing costs. Translating this to probability-based purchase
+tasks, should the interpretation be the extent to which an organism (i.e.,
+human) defends its baseline likelihood of engaging in the behavior?
+Also, how sensitive are respondents to differences in probabilities?
+For example, is there a meaningful difference between someone responding
+with a likelihood of 62% versus 69% or 18% versus 23%? This will depend
+somewhat on the task, but may inject an artificial degree of
+accuracy into the data.
+
+The second consideration is when modeling these types of data, what should
+the interpretation of Q~0~ be if it is estimated to exceed 1 (or 100%)? Is it
+possible for someone to be more than 100% likely to engage in a behavior? This
+parameter could be constrained at a group or individual level basis leaving
+only one (i.e., $\alpha$) or two (i.e., $\alpha$ and *k*) parameters to be
+estimated, but this assumption may be too restrictive depending on the research
+question.
+
+Two considerations for addressing these issues are to reconceptualize the
+purchase task as a dichotomous choice task (i.e., "yes" or "no" at each
+price point) and consider using a logistic regression model. When
+conceptualizing a probability-based purchase task, it may be helpful to
+consider that, in reality, the respondent can only make one choice: they
+either engage in the behavior or they do not. Therefore, a dichotomous
+choice task may more accurately reflect the individual's actual behavior
+in the real world. Data from such a task lends itself well to
+logistic regression models where the outcome is a binary variable. The
+logistic regression model, therefore, is used to estimate the *probability* of
+engaging in the behavior at each price point rather than relying on the
+respondent to report these probabilities with an unknown degree of accuracy.
+
+## Recommended Resources and Readings
+
+This chapter is not exhaustive of the demand curve literature (including
+demand curve analysis), regression modeling, nor working in R. There are
+numerous other resources that serve as valuable resources for these
+topics. With respect to the demand curve literature, I recommend the reader
+look at papers by some of the following authors (in no specific order):
+@reedBehavioralEconomicsTutorial2013, @stricklandUtilizingCommodityPurchase2020,
+@romaProgress2016, @reedAppliedBehavioralEconomics2022,
+@astonAssessingCannabisDemand2020, @reedBehavioralEconomicMeasurement2020,
+@zvorskySensitivityHypotheticalPurchase2019,
+@weinsztokSubstancerelatedCrosscommodityPurchase2023, @kiselicaMeta2016,
+and @kaplanAptReview2018.
+
+With respect to statistics and the intersection of statistics and behavioral
+economics, I recommend the reader look at resources by some of the following
+authors: @youngPlaceStatisticsBehavior2018,
+@yuAnalyticalProblemsSuggestions2014, @kaplanApplyingMixedeffectsModeling2021a,
+@hoBayesianHierarchicalModel2018, @mcelreathStatisticalRethinkingBayesian2018,
+and @jamesIntroductionStatisticalLearning2023.
+
+With respect to learning more about R, a number of fantastic resources exist
+online such as @wickham2016r and @wickhamAdvanced2019,
+[https://swirlstats.com](https://swirlstats.com), and
+[the R journal](https://journal.r-project.org). Another good resource for new
+users of R who are interested in conducting
+demand curve analyses is the paper by @kaplanPackageBeezdemandBehavioral2019
+and the  associated document "Introduction to R and beezdemand" available at:
+[https://github.com/brentkaplan/beezdemand/tree/master/pobs](https://github.com/brentkaplan/beezdemand/tree/master/pobs) along with @gilroyFurtheringOpenScience2019a (which
+introduces and explains GitHub). The former document
+provides beginner-friendly steps for using R and recommends resources for
+learning its fundamental functionalities.
+
+# Conclusion
+
+Quantitative analysis of behavioral economic demand data continues to
+evolve with new models, methods, and tools becoming available to researchers.
+In this chapter, I provided a general approach to conducting demand analyses
+through seven key steps, from initial planning through final interpretation. I
+demonstrated various regression approaches including fit-to-group, two-stage, and
+mixed-effects modeling, and their implementation using freely
+available tools like R and the *beezdemand* package. By following these
+systematic approaches and leveraging modern analytical tools, researchers can
+produce more robust and replicable demand analyses. The field continues to
+advance with new methodological developments, offering exciting opportunities
+for future research. As these methods become more accessible through
+open-source tools, the quality and sophistication of behavioral economic
+demand analyses will continue to improve. Understanding how these models work
+is just a first step in advancing the field.
+
+\newpage
+
+# References
+
+<div id="refs"></div>
+
+# Appendix
+
+```{r}
+#| label: apt_snd_fits
+#| cache: true
+#| message: false
+#| warning: false
+#| output: false
+#| eval: true
+
+# nlmrt::wrapnls version
+apt_averaged_snd <- apt |>
+  # for each x value (i.e., price)
+  group_by(x) |>
+  # calculate the mean of y
+  summarise(mn = mean(y)) |>
+  # fit the nonlinear model
+  nlmrt::wrapnls(
+    # specify the model by Koffarnus et al.
+    mn ~ 10^(q0) * exp(-10^(alpha) * 10^(q0) * x),
+    # find starting values that appear feasible based on the data
+    start = list(q0 = 1, alpha = -1),
+    data = _,
+    control = list(maxiter = 1000)
+  )
+
+apt_pooled_snd <- apt |>
+  nlmrt::wrapnls(
+    y ~ 10^(q0) * exp(-10^(alpha) * 10^(q0) * x),
+    start = list(q0 = 1, alpha = -1),
+    data = _,
+    control = list(maxiter = 1000)
+  )
+
+apt_nlme_snd <- nlme::nlme(
+  y ~ 10^(q0) * exp(-10^(alpha) * 10^(q0) * x),
+  data = apt,
+  fixed = list(
+    q0 ~ 1,
+    alpha ~ 1
+  ),
+  random = list(nlme::pdDiag(q0 + alpha ~ 1)),
+  start = list(fixed = c(
+    coef(apt_averaged_snd)[1],
+    coef(apt_averaged_snd)[2]
+  )),
+  groups = ~id,
+  method = "ML",
+  verbose = 2,
+  control = list(
+    msMaxIter = 5000,
+    niterEM = 5000,
+    maxIter = 5000,
+    pnlsTol = .001,
+    tolerance = .01,
+    apVar = T,
+    minScale = .0000001,
+    opt = "optim"
+  )
+)
+
+
+
+```
+
+```{r}
+#| label: tbl-apt-beez-descriptives
+#| tbl-cap: Descriptive statistics for the Alcohol Purchase Task data generated from the beezdemand package.
+#| ft.align: left
+#| eval: true
+
+beezdemand::GetDescriptives(apt) |>
+  flextable() |>
+  colformat_double(j = c("Mean", "SD", "PropZeros"), digits = 2) |>
+  font(fontname = "Times New Roman", part = "all")
+```
+
+```{r}
+#| label: tbl-apt-unsystematic-descriptives
+#| tbl-cap: Breakdown of number of response sets with the number of criteria passed.
+#| ft.align: left
+#| eval: true
+
+apt_unsys |>
+  count(TotalPass) |>
+  mutate(
+    percentage = (n / sum(n)) * 100,
+    percentage = paste0(round(percentage, 2), "%")
+  ) |>
+  flextable() |>
+  font(fontname = "Times New Roman", part = "all")
+```
+
+```{r}
+#| label: fig-apt-fit-to-means-model-compare
+#| fig-cap: Model comparison using the fit-to-means approach.
+#| apa-note: Zero is undefined on the log scale, so this plot uses a pseudo-log scale to visualize zero.
+#| warning: false
+#| eval: true
+
+# create a vector of x values to smooth the curve
+x <- c(0, 0.001 * 1.1^(0:130))
+# create a data frame of predicted values
+q0 <- coef(apt_averaged_snd)[[1]]
+alpha <- coef(apt_averaged_snd)[[2]]
+apt_average_snd_preds <- data.frame(
+  predx = x,
+  predy = 10^(q0) * exp(-10^(alpha) * 10^(q0) * x)
+)
+
+# combine predicted data
+apt_average_combined_preds <- rbind(
+  mutate(
+    apt_average_preds,
+    Model = "Equation 3"
+  ),
+  mutate(
+    apt_average_snd_preds,
+    Model = "Equation 4"
+  )
+)
+
+# plot the data
+apt_averaged_snd_fig <- apt |>
+  # for each x value (i.e., price)
+  group_by(x) |>
+  # calculate the mean of y
+  summarise(mn = mean(y)) |>
+  ggplot(aes(x = x, y = mn)) +
+  # add the predicted values as a line
+  geom_line(
+    data = apt_average_combined_preds,
+    aes(x = predx, y = predy, color = Model),
+    size = 1.5,
+    alpha = .75
+  ) +
+  # add the mean data points
+  geom_point(
+    shape = 21,
+    fill = "white",
+    color = "black",
+    size = 2.5
+  ) +
+  # create a pseudo-log x-axis scale
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(sigma = .2, base = 10),
+    breaks = c(0, 0.25, 0.5, 1, 5, 10, 20),
+    labels = c("0", "0.25", "0.50", "1", "5", "10", "20"),
+    limits = c(0, 20.5),
+    expand = c(.01, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.03, 0),
+    limits = c(0, 10)
+  ) +
+  ggsci::scale_color_jama() +
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Hypothetical Drinks Purchased",
+    title = "Model comparison using the fit-to-means approach"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position.inside = c(.1, .9),
+    legend.position = "inside",
+    legend.background = element_rect(color = "black"),
+    axis.text = element_text(color = "black")
+  )
+
+ggsave(
+  filename = "apt_averaged_snd.pdf",
+  plot = apt_averaged_snd_fig,
+  device = "pdf",
+  path = pdir,
+  width = 9,
+  height = 8
+)
+
+ggsave(
+  filename = "apt_averaged_snd.tiff",
+  plot = apt_averaged_snd_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 9,
+  height = 8
+)
+
+apt_averaged_snd_fig
+```
+
+```{r}
+#| label: fig-apt-fit-to-pooled-model-compare
+#| fig-cap: Model comparison using the fit-to-pooled approach for the Alcohol Purchase Task data. All data points within 0 - 30 on the y-axis are shown, even though all data are used to fit the model. Data points are transparent so the darker the mass of points, the more data points are located at that price - consumption combination.
+#| apa-note: Zero is undefined on the log scale, so this plot uses a pseudo-log scale to visualize zero.
+#| warning: false
+#| eval: true
+
+# create a vector of x values to smooth the curve
+x <- c(0, 0.001 * 1.1^(0:130))
+# create a data frame of predicted values
+q0 <- coef(apt_pooled_snd)[[1]]
+alpha <- coef(apt_pooled_snd)[[2]]
+apt_pooled_snd_preds <- data.frame(
+  predx = x,
+  predy = 10^(q0) * exp(-10^(alpha) * 10^(q0) * x)
+)
+
+# combine predicted data
+apt_pooled_combined_preds <- rbind(
+  mutate(
+    apt_average_preds,
+    Model = "Equation 3"
+  ),
+  mutate(
+    apt_pooled_snd_preds,
+    Model = "Equation 4"
+  )
+)
+
+# plot the data
+apt_pooled_snd_fig <- apt |>
+  ggplot(aes(x = x, y = y)) +
+  # add the predicted values as a line
+  geom_line(
+    data = apt_pooled_combined_preds,
+    aes(x = predx, y = predy, color = Model),
+    alpha = .75,
+    size = 1.5
+  ) +
+  # add the data points
+  geom_point(
+    shape = 16,
+    color = "black",
+    size = 1,
+    alpha = .1,
+    position = position_jitter(width = .01, height = .1)
+  ) +
+  # create a pseudo-log x-axis scale
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(sigma = .2, base = 10),
+    breaks = c(0, 0.25, 0.5, 1, 5, 10, 20),
+    labels = c("0", "0.25", "0.50", "1", "5", "10", "20"),
+    limits = c(0, 20.5),
+    expand = c(.01, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.03, 0),
+    limits = c(0, 30)
+  ) +
+  ggsci::scale_color_jama() +
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Hypothetical Drinks Purchased",
+    title = "Model comparison using the fit-to-pooled approach"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position.inside = c(.1, .9),
+    legend.position = "inside",
+    legend.background = element_rect(color = "black"),
+    axis.text = element_text(color = "black")
+  )
+
+
+
+ggsave(
+  filename = "apt_pooled_snd.pdf",
+  plot = apt_pooled_snd_fig,
+  device = "pdf",
+  path = pdir,
+  width = 9,
+  height = 8
+)
+
+ggsave(
+  filename = "apt_pooled_snd.tiff",
+  plot = apt_pooled_snd_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 9,
+  height = 8
+)
+
+apt_pooled_snd_fig
+
+```
+
+```{r}
+#| label: fig-apt-nlme-model-compare
+#| fig-cap: Model comparison using the mixed effects model approach
+#| apa-note: Zero is undefined on the log scale, so this plot uses a pseudo-log scale to visualize zero.
+#| warning: false
+#| message: false
+#| eval: true
+
+pred_snd <- function(q0, alpha) {
+  x <- c(0, 0.001 * 1.1^(0:130))
+  data.frame(
+    predx = x,
+    predy = 10^(q0) * exp(-10^(alpha) * 10^(q0) * x)
+  )
+}
+
+# generate predicted lines for subset using random effects
+newvary_snd <- coef(apt_nlme_snd) |>
+  rownames_to_column("id") |>
+  group_by(id) |>
+  mutate(preds = map2(q0, alpha, pred_snd)) |>
+  ungroup() |>
+  unnest(cols = "preds")
+
+# generate predicted line for population (fixed effects)
+newavg_snd <- data.frame(
+  q0 = nlme::fixef(apt_nlme_snd)[[1]],
+  alpha = nlme::fixef(apt_nlme_snd)[[2]]
+) |>
+  mutate(id = "fixed") |>
+  group_by(id) |>
+  mutate(preds = map2(q0, alpha, pred_snd)) |>
+  ungroup() |>
+  unnest(cols = "preds")
+
+
+# combine predicted data
+apt_nlme_combined_newvary <- rbind(
+  mutate(
+    newvary,
+    Model = "Equation 3"
+  ),
+  mutate(
+    newvary_snd,
+    Model = "Equation 4"
+  )
+)
+
+apt_nlme_combined_newavg <- rbind(
+  mutate(
+    newavg,
+    Model = "Equation 3"
+  ),
+  mutate(
+    newavg_snd,
+    Model = "Equation 4"
+  )
+)
+
+apt_sub <- apt_nlme_combined_newvary |>
+  dplyr::filter(id %in% 1:10) |>
+  left_join(
+    select(apt_nlme_combined_newavg, Model, predx, "avgy" = predy),
+    by = c("Model", "predx")
+  ) |>
+  mutate(
+    id = as.numeric(id),
+    id = as.factor(id)
+  )
+
+apt_mixed_subset_snd_fig <- apt_sub |>
+  ggplot(
+    aes(
+      x = predx,
+      y = predy,
+      group = interaction(id, Model),
+      color = Model
+    )
+  ) +
+  geom_line(
+    alpha = .66,
+    linetype = "dotted"
+  ) +
+  geom_line(
+    aes(x = predx, y = avgy),
+    size = 1,
+    alpha = .66
+  ) +
+  geom_point(
+    aes(x = x, y = y, group = id),
+    data = dplyr::filter(apt, id %in% 1:10),
+    shape = 21,
+    fill = "white",
+    color = "black",
+    size = 2
+  ) +
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(sigma = .2, base = 10),
+    breaks = c(0, 0.25, 0.5, 1, 5, 10, 20),
+    labels = c("0", "0.25", "0.50", "1", "5", "10", "20"),
+    limits = c(0, 20.5),
+    expand = c(.02, 0)
+  ) +
+  scale_y_continuous(
+    expand = c(.03, 2),
+    limits = c(0, 15)
+  ) +
+  ggsci::scale_color_jama() +
+  facet_wrap(~id, ncol = 2) +
+  labs(
+    x = "Price per Drink ($USD)",
+    y = "Hypothetical Drinks Purchased",
+    title = "Model comparison using the mixed-effects modeling approach"
+  ) +
+  theme_bw() +
+  theme(
+    legend.background = element_rect(color = "black"),
+    axis.text = element_text(color = "black"),
+    axis.ticks = element_line(color = "black")
+  )
+
+ggsave(
+  filename = "apt_mixed_subset_snd.pdf",
+  plot = apt_mixed_subset_snd_fig,
+  device = "pdf",
+  path = pdir,
+  width = 9,
+  height = 8
+)
+
+ggsave(
+  filename = "apt_mixed_subset_snd.tiff",
+  plot = apt_mixed_subset_snd_fig,
+  device = "tiff",
+  compression = "lzw",
+  path = pdir,
+  width = 9,
+  height = 8
+)
+
+apt_mixed_subset_snd_fig
+
+```
